@@ -1,116 +1,187 @@
 import streamlit as st
 import pandas as pd
 import datetime
-import plotly.express as px
 
-st.set_page_config(page_title="💰 Budget Tracker", layout="centered")
+st.set_page_config(page_title="💰 Budget Tracker (Free)", layout="centered")
 
-# Optional CSS styling
-def load_css(file_name):
-    try:
-        with open(file_name) as f:
-            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
-    except FileNotFoundError:
-        pass  # No custom CSS provided
+# --- Initialize session ---
+if "form_date" not in st.session_state:
+    st.session_state.form_date = datetime.date.today()
 
-load_css("styles.css")  # Optional custom CSS file
+if "transactions" not in st.session_state:
+    st.session_state.transactions = pd.DataFrame(columns=["Date", "Type", "Category", "Amount", "Note"])
 
+if "t_type" not in st.session_state:
+    st.session_state.t_type = "Income"
 
-st.title("💰 Simple Budget Tracker")
+if "last_categories" not in st.session_state:
+    st.session_state.last_categories = {}
+
+# --- Title and instructions ---
+st.title("💰 Simple Budget Tracker (Free Version)")
 
 with st.expander("❓ How to Use This App", expanded=False):
     st.markdown("""
-- Add your Income, Expenses, and Savings transactions using the form below.  
-- View your financial summary and insights in real time.  
-- Use the download button to save your data as a CSV backup.  
-- Click “Reset” if you want to start over fresh.  
+**Welcome to your Free Budget Tracker!**
 
-**✨ Premium features include:**
-- 📊 Pie Chart for Expense Breakdown  
-- 📤 Upload CSV to restore data  
-- 📋 Full Transaction History with filters  
-- 💰 Saving & Salary Breakdown  
-- 🎯 Financial Goals Tracker  
-- ☁️ Backup and Trend Analysis *(coming soon)*   
-- 🔄 Recurring Entries *(coming soon)*  
+Here’s how to use it:
+- ➕ Add your income, expenses, or savings using the form below.
+- 📈 View your financial summary at a glance.
+- 📋 Scroll down to see your transaction history.
 
+---
 
-""")
+### 🔓 Want More Power? Upgrade to Premium for:
 
+- 📈 Income/Expense Trends (Plotly)  
+- 🧮 Pie and Bar Breakdown (Income, Expense, Saving)  
+- 📋 Filterable Transaction History  
+- 🔮 Financial insights with alerts and projection    
+- 🎯 Debt tracking (Snowball/Avalanche strategie 
+- 📁 CSV, Excel, and PDF export + impor   
+    """)
 
-# Select transaction type
-t_type = st.selectbox("Transaction Type", ["Income", "Expense", "Saving"])
+# --- Transaction Type and categories selection ---
+t_type = st.selectbox(
+    "Transaction Type",
+    ["Income", "Expense", "Saving"],
+    index=["Income", "Expense", "Saving"].index(st.session_state.t_type)
+)
+st.session_state.t_type = t_type
 
-# Categories based on type
-if t_type == "Income":
-    categories = ["Salary", "Bonus", "Other"]
-elif t_type == "Expense":
-    categories = ["Food", "Rent/Mortgage", "Bills", "Transport", "Entertainment", "Travel", "Other"]
-else:  # Saving
-    categories = ["Emergency Fund", "Retirement", "TFSA", "Other"]
+categories_map = {
+    "Income": ["Salary", "Bonus", "Other"],
+    "Expense": ["Food", "Rent/Mortgage", "Bills", "Transport", "Entertainment", "Travel", "Other"],
+    "Saving": ["Emergency Fund", "Retirement", "TFSA", "Other"]
+}
+categories = categories_map.get(t_type, ["Other"])
 
-# --- Form for input ---
+default_cat = st.session_state.last_categories.get(t_type, categories[0])
+if default_cat not in categories:
+    default_cat = categories[0]
+
+# --- Date selector outside the form ---
+st.session_state.form_date = st.date_input(
+    "Select Date",
+    value=st.session_state.form_date,
+    key="date_input_outside"
+)
+
+# --- Transaction Entry Form ---
 with st.form("entry_form", clear_on_submit=True):
     col1, col2 = st.columns(2)
-    date = col1.date_input("Date", datetime.date.today())
-    category = col2.selectbox("Category", categories)
-    amount = st.number_input("Amount", min_value=0.0, step=0.01)
-    note = st.text_input("Note (optional)")
-    
+
+    # Use the date selected above (no date picker inside the form!)
+    date = st.session_state.form_date
+
+    category = st.selectbox(
+        "Category",
+        categories,
+        index=categories.index(default_cat),
+        key="category_select"
+    )
+    amount = st.number_input(
+        "Amount",
+        min_value=0.01,
+        step=0.01,
+        format="%.2f",
+        key="amount_input"
+    )
+    note = st.text_input("Note (optional)", key="note_input")
+
     submitted = st.form_submit_button("Add Transaction")
+    MAX_ENTRIES_FREE = 20  # max number of transactions allowed in free version
 
     if submitted:
-        if 'transactions' not in st.session_state:
-            st.session_state.transactions = pd.DataFrame(columns=["Date", "Type", "Category", "Amount", "Note"])
-        
-        new_row = {
-            "Date": date,
-            "Type": t_type,
-            "Category": category,
-            "Amount": amount,
-            "Note": note
-        }
-        st.session_state.transactions = pd.concat(
-            [st.session_state.transactions, pd.DataFrame([new_row])],
-            ignore_index=True
-        )
-        st.success("Transaction added!")
+        if amount <= 0:
+            st.error("Amount must be greater than zero.")
+        elif len(st.session_state.transactions) >= MAX_ENTRIES_FREE:
+            st.warning(f"🚫 Free version limits you to {MAX_ENTRIES_FREE} entries. Upgrade to Premium for unlimited!")
+        elif date.month != datetime.date.today().month or date.year != datetime.date.today().year:
+            st.warning("🚫 Free version only supports entries for the current month. Upgrade to Premium for all dates!")
+        else:
+            new_row = {
+                "Date": date,
+                "Type": t_type,
+                "Category": category,
+                "Amount": amount,
+                "Note": note,
+            }
+            st.session_state.transactions = pd.concat(
+                [st.session_state.transactions, pd.DataFrame([new_row])],
+                ignore_index=True,
+            )
+            st.session_state.last_categories[t_type] = category
+            st.success("Transaction added!")
 
-# --- Show Summary & Charts ---
-if 'transactions' in st.session_state and not st.session_state.transactions.empty:
+# --- Summary and Transaction Table ---
+if not st.session_state.transactions.empty:
     df = st.session_state.transactions.copy()
     df["Date"] = pd.to_datetime(df["Date"])
     df = df.sort_values("Date", ascending=False)
+    df["Type Icon"] = df["Type"].map({"Income": "🟢", "Expense": "🔴", "Saving": "💙"})
 
     total_income = df[df["Type"] == "Income"]["Amount"].sum()
     total_expense = df[df["Type"] == "Expense"]["Amount"].sum()
     total_saving = df[df["Type"] == "Saving"]["Amount"].sum()
     net_balance = total_income - total_expense
+    available_balance = total_income - total_expense - total_saving
 
-    # 💡 Summary display
     st.markdown("### 💡 Summary")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Income", f"${total_income:,.2f}")
-        st.metric("Saving", f"${total_saving:,.2f}")
-    with col2:
-        st.metric("Expense", f"${total_expense:,.2f}")
-        st.metric("Net Balance", f"${net_balance:,.2f}")
+    cols = st.columns(3)
+    with cols[0]:
+        st.metric("💰 Income", f"${total_income:,.2f}", help="Total money earned")
+    with cols[1]:
+        st.metric("💸 Expenses", f"${total_expense:,.2f}", delta=f"-${total_expense:,.2f}", help="Total money spent")
+    with cols[2]:
+        st.metric("🏦 Savings", f"${total_saving:,.2f}", help="Money set aside")
 
-  
-    # 📥 CSV download
-    csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label="📥 Download CSV",
-        data=csv,
-        file_name="transactions.csv",
-        mime="text/csv"
-    )
+    cols2 = st.columns(3)
+    with cols2[0]:
+        st.metric("📈 Net Balance", f"${net_balance:,.2f}", help="Income - Expenses")
+    with cols2[1]:
+        st.metric("📊 Available", f"${available_balance:,.2f}", help="Income - Expenses - Savings")
+    with cols2[2]:
+        st.metric("📅 Period", "This Month")
 
-    # 🔄 Reset data
-    if st.button("🔄 Reset All Data"):
-        del st.session_state.transactions
-        st.success("All data has been reset.")
+    # --- Explanation of Terms ---
+    with st.expander("📘 What Do These Mean?", expanded=True):
+        st.markdown("""
+- **💰 Income**: Total money earned (e.g. salary, bonus).  
+- **💸 Expense**: Money spent (e.g. food, rent, transport).  
+- **🏦 Saving**: Money you've set aside and not meant to spend now.  
+- **📈 Net Balance**: Income - Expenses (shows overall flow).  
+- **📊 Available Balance**: Income - Expenses - Savings (your usable money now).  
+        """)
 
+    # --- Transaction History Table ---
+    st.markdown("### 📋 Transaction History")
+    with st.container():
+        st.dataframe(df[["Date", "Type", "Category", "Amount", "Note","Type Icon"]], use_container_width=True)
 else:
     st.info("No transactions yet. Add your first one above!")
+
+st.markdown("---")
+st.markdown("""
+
+## 🚀 Upgrade to Premium for More Features!
+
+| Feature                         | Free Version ✅                         | Premium Version 🚀               |
+|--------------------------------|--------------------------------------|--------------------------------|
+| Add income, expenses, savings  | ✅ Limited entries, current month only | ✅ Unlimited, full history      |
+| Financial summary dashboard     | ✅                                    | ✅                             |
+| Transaction history             | ✅ Basic for current month             | ✅ Filterable & detailed full history |
+| Income/Expense Trends           | ❌                                    | ✅ Interactive Plotly charts    |
+| Pie and Bar Breakdown           | ❌                                    | ✅                             |
+| Financial insights & projections| ❌                                    | ✅                             |
+| Debt tracking (Snowball/Avalanche) | ❌                                | ✅                             |
+| Export CSV, Excel, PDF          | ❌                                    | ✅                             |
+| Import CSV                     | ❌                                    | ✅                             |
+| Priority Support               | ❌                                    | ✅                             |
+
+---
+
+### 🔓 Want to unlock unlimited tracking and all features? Upgrade to Premium now or Start Free Trial!
+
+[👉 Click here to Upgrade or Start Free Trial](https://your-upgrade-link.com)
+""")
